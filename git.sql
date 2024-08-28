@@ -1,5 +1,3 @@
---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
-
 use role accountadmin;
 
 create or replace secret github_secret
