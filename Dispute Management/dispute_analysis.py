@@ -3,7 +3,7 @@ import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from snowflake.cortex import Summarize
 from snowflake.snowpark.functions import col
-from streamlit import vega_lite_chart
+from streamlit import (vega_lite_chart, code)
 
 # Write directly to the app
 st.title("Predicitve Analysis of Chargebacks :chart_with_downwards_trend:")
@@ -13,18 +13,22 @@ st.subheader(
     """
 )
 
-model = st.sidebar.selectbox('Select your model:',(
-                                    'mixtral-8x7b',
-                                    'snowflake-arctic',
-                                    'mistral-large',
-                                    'llama3-8b',
-                                    'llama3-70b',
-                                    'reka-flash',
-                                     'mistral-7b',
-                                     'llama2-70b-chat',
-                                     'gemma-7b'))
+
 # Get the current credentials
 session = get_active_session()
+
+model_names= session.sql('SELECT MODEL FROM MODEL_PRICING order by CREDITS_PER_MILLION_TOKENS ').to_pandas()
+
+model = st.sidebar.selectbox('Select your model:',model_names)
+
+#per_token =session.sql('SELECT CREDITS_PER_MILLION_TOKENS FROM MODEL_PRICING WHERE model=?',params=[model]).to_pandas()
+per_token= session.table('MODEL_PRICING').select('CREDITS_PER_MILLION_TOKENS').filter(col('MODEL')==model).collect()
+# st.sidebar.write(per_token)
+# st.sidebar.write(per_token[0])
+tokens= per_token[0].CREDITS_PER_MILLION_TOKENS
+
+st.sidebar.write(tokens,'credits will be consumed per 1M tokens.')
+
 
 # Use an interactive slider to get user input
 
@@ -38,7 +42,7 @@ year = st.slider(
 
 
 sql= f"""
-    SELECT * FROM DISPUTE_DATA WHERE EXTRACT(YEAR FROM CHARGEBACK_DATE) = {year};
+    SELECT * FROM DISPUTE_DATA WHERE EXTRACT(YEAR FROM CHARGEBACK_DATE) <= {year};
 """
 data= session.sql(sql).to_pandas()
 st.subheader("List of all chargebacks over the years:page_with_curl:")
@@ -53,25 +57,36 @@ with st.expander("Click to see insight on above data"):
 with st.expander("Click to see Monthly Trends"):
     sql2=f"""
     SELECT
-    TO_CHAR(CHARGEBACK_DATE, 'YYYY-MM') AS month_year,
-    Chargeback_Reason,
+    TO_CHAR(CHARGEBACK_DATE, 'YYYY') AS year,
+    DISPUTE_TYPE,
     COUNT(*) AS chargeback_count
-    FROM CHARGEBACKS WHERE EXTRACT(YEAR FROM CHARGEBACK_DATE) >=2020 and EXTRACT(YEAR FROM CHARGEBACK_DATE)<={year}
+    FROM DISPUTE_DATA WHERE EXTRACT(YEAR FROM CHARGEBACK_DATE) >=2020 and EXTRACT(YEAR FROM CHARGEBACK_DATE)<={year}
     GROUP BY 1, 2
     ORDER BY 1;
     """
     monthly_trends= session.sql(sql2).to_pandas()
+    value_chart_tab, value_dataframe_tab, value_query_tab = st.tabs([
+        "Chart",
+        "Raw Data",
+        "SQL Query"
+    ])
+
     st.subheader("Monthly Trends :calendar:")
-    st.bar_chart(monthly_trends, x='MONTH_YEAR', y='CHARGEBACK_COUNT', color='CHARGEBACK_REASON')
+    with value_chart_tab:
+        st.line_chart(monthly_trends, x='YEAR', y='CHARGEBACK_COUNT', color='DISPUTE_TYPE')
+    with value_dataframe_tab:
+        st.dataframe(monthly_trends)
+    with value_query_tab:
+        code(sql2)
 
 st.subheader("Classifying the Disputes:")
 st.markdown("You can see who might be responsible for future chargbacks.")
 sql3= f"""
-        SELECT * FROM DISPUTE_OUTCOME;
+        SELECT * FROM CHARGEBACK_PREDICTED_OUTCOME3;
     """
 prediction= session.sql(sql3).to_pandas()
 st.dataframe(prediction)
-if st.button("Visualize the Prediction"):
+if st.button("Visualize the Prediction :pushpin:"):
 
     # Streamlit application
     st.header("Chargeback Predictive Analysis")
@@ -95,7 +110,7 @@ if st.button("Visualize the Prediction"):
     
     st.subheader("2: Product Type Distribution")
     # Aggregate the data to count outcomes by MEMBER_DOCUMENTATION
-    outcomes_count = prediction.groupby(['DISPUTE_TYPE', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
+    outcomes_count = prediction.groupby(['MERCHANT_CATEGORY', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
     # Create a stacked bar chart with Vega-Lite
     stacked_bar_chart = {
         "data": {
@@ -103,7 +118,7 @@ if st.button("Visualize the Prediction"):
         },
         "mark": "bar",
         "encoding": {
-            "x": {"field": "DISPUTE_TYPE", "type": "nominal", "axis": {"labelAngle": -45}},
+            "x": {"field": "MERCHANT_CATEGORY","title":"Product Type", "type": "nominal", "axis": {"labelAngle": -45}},
             "y": {"field": "Count", "type": "quantitative"},
             "color": {"field": "LIABLE_FOR_DISPUTE", "type": "nominal", "scale": {"scheme": "category10"}}
         },
@@ -114,7 +129,7 @@ if st.button("Visualize the Prediction"):
 
     # Use Case 2: Chargeback Reasons Distribution
     st.subheader("3: Dispute Type Distribution")
-    reason_counts = prediction.groupby(['DISPUTE_TYPE', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
+    reason_counts = prediction.groupby(['CHARGEBACK_REASON', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
 
     reasons_bar_chart = {
         "data": {
@@ -122,7 +137,7 @@ if st.button("Visualize the Prediction"):
         },
         "mark": "bar",
         "encoding": {
-            "x": {"field": "DISPUTE_TYPE", "type": "nominal", "axis": {"labelAngle": -45}},
+            "x": {"field": "CHARGEBACK_REASON", "title":"Dispute Type","type": "nominal", "axis": {"labelAngle": -45}},
             "y": {"field": "Count", "type": "quantitative"},
             "color": {"field": "LIABLE_FOR_DISPUTE", "type": "nominal", "scale": {"scheme": "category10"}}
         }
@@ -184,6 +199,7 @@ st.line_chart(sentiment_data,x="PRODUCT_TYPE",y="SENTIMENT_RESULT")
 
 st.subheader("Need Details?")
 dispute_ids = sentiment_data['DISPUTE_ID'].unique().tolist()  # Get unique DISPUTE_IDs
+dispute_ids.sort() 
 selected_dispute_id = st.selectbox("Select a DISPUTE_ID for more information:", options=[""] + dispute_ids, index=0)
 
 if selected_dispute_id:
@@ -208,12 +224,12 @@ if selected_dispute_id:
     
     def create_prompt(context):
         prompt = f"""
-              'You are an expert assistant in extracting insights from the provided context. 
+              'You are an expert assistant in extracting insights from the above dispute data and resolve them. 
                 Answer the question based on the context and offer actionable solutions tailored for sales executives seeking to enhance customer service. Be concise and do not hallucinate. 
                 If you don't have the information, simply state that. 
                 Context: {context} 
                 Question: 
-                Generate actionable recommendations for sales executives to address the issues highlighted in the context and improve customer service effectively. 
+                Generate actionable recommendations in very short for sales executives to address the issues highlighted in the context and improve customer service effectively. 
                 Answer:
                """
         return prompt
@@ -229,10 +245,55 @@ if selected_dispute_id:
         
         return df_response
 
-    response=display_solution(summary, model)
-    st.header("Recommended Solution:")
-    st.markdown(response[0].RESPONSE)
+    
+    
+    if st.button("Want Recommended solution? :seedling:"):
+        response=display_solution(summary, model)
+        st.header("Recommended way to resolve the dispute:")
+        st.markdown(response[0].RESPONSE)
 
-
-
+    cmd = f"""
+        SELECT 'COMPLETE' AS FUNCTION, ? as MODEL, SUM(TOKENS) AS TOTAL_TOKENS,
+               SUM(TOKENS)/1000000 AS TOTAL_TOKENS_FOR_CREDITS,
+               (SUM(TOKENS) / 1000000) * 0.22 AS CREDITS_BILLED,
+               CREDITS_BILLED * 3 AS TOTAL_COST_USD
+        FROM (
+            SELECT DISPUTE_ID, CUSTOMER_STATEMENT,
+                   CONCAT(
+                       'You are an expert assistant in extracting insights from the above dispute data and resolve them. Answer the question based on the context and offer actionable solutions tailored for sales executives seeking to enhance customer service. Be concise and do not hallucinate. If you don''t have the information, simply state that. Question: Generate actionable recommendations for sales executives to address the issues highlighted in the context and improve customer service effectively. Context: ',
+                       CUSTOMER_STATEMENT
+                   ) AS prompt,
+                   SNOWFLAKE.CORTEX.COUNT_TOKENS(?, prompt) AS TOKENS
+            FROM DISPUTE_OUTCOME
+            WHERE STATUS = 'Rejected'
+        ) 
+        UNION
+        SELECT 'SUMMARIZE' AS FUNCTION, ? AS MODEL, SUM(TOKENS) AS TOTAL_TOKENS,
+               SUM(TOKENS)/1000000 AS TOTAL_TOKENS_FOR_CREDITS,
+               (SUM(TOKENS) / 1000000) * 0.10 AS CREDITS_BILLED,
+               CREDITS_BILLED * 3 AS TOTAL_COST_USD
+        FROM (
+            SELECT DISPUTE_ID, CUSTOMER_STATEMENT,
+                   SNOWFLAKE.CORTEX.COUNT_TOKENS('summarize', CUSTOMER_STATEMENT) AS TOKENS
+            FROM DISPUTE_OUTCOME
+            WHERE STATUS = 'Rejected'
+        ) 
+        UNION
+        SELECT 'SENTIMENT' AS FUNCTION, ? AS MODEL, SUM(TOKENS) AS TOTAL_TOKENS,
+               SUM(TOKENS)/1000000 AS TOTAL_TOKENS_FOR_CREDITS,
+               (SUM(TOKENS) / 1000000) * 0.08 AS CREDITS_BILLED,
+               CREDITS_BILLED * 3 AS TOTAL_COST_USD
+        FROM 
+        (
+            SELECT DISPUTE_ID, CUSTOMER_STATEMENT,
+                   SNOWFLAKE.CORTEX.COUNT_TOKENS('sentiment', CUSTOMER_STATEMENT) AS TOKENS
+            FROM DISPUTE_OUTCOME
+            WHERE STATUS = 'Rejected'
+        ) 
+    """
+    # Assuming you have already set the 'model' variable properly
+    credits_spent = session.sql(cmd, params=[model, model, model, model]).to_pandas()
+    st.subheader("What will be the maximum cost incurred?")
+    st.write("We're taking only rejected disputes into account for calculation of pricing.")
+    st.dataframe(credits_spent)
 
