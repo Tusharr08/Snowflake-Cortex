@@ -1,9 +1,25 @@
 # Import python packages
 import streamlit as st
+from snowflake.core import Root
 from snowflake.snowpark.context import get_active_session
 from snowflake.cortex import Summarize
 from snowflake.snowpark.functions import col
 from streamlit import (vega_lite_chart, code)
+import pandas as pd
+import plotly.express as px
+import seaborn as sns
+import matplotlib.pyplot as plt
+import altair as alt
+import numpy as np
+
+# Database and service configuration
+CORTEX_SEARCH_DATABASE = "CORTEX_POC"
+CORTEX_SEARCH_SCHEMA = "DISPUTE"
+CORTEX_SEARCH_SERVICE = "DISPUTE_SAMPLE"
+COLUMNS = [
+    'DISPUTE_ID', 'CUSTOMER_ID', 'MERCHANT_ID', 'AMOUNT', 'PRODUCT_TYPE', 'DISPUTE_TYPE',
+    'CUSTOMER_STATEMENT', 'ASSIGNED_STAFF', 'CUSTOMER_DOCUMENTATION', 'STATUS'
+]
 
 # Write directly to the app
 st.title("Predicitve Analysis of Chargebacks :chart_with_downwards_trend:")
@@ -14,8 +30,12 @@ st.subheader(
 )
 
 
+
 # Get the current credentials
 session = get_active_session()
+root = Root(session)
+cortex_search_service = root.databases[CORTEX_SEARCH_DATABASE].schemas[CORTEX_SEARCH_SCHEMA].cortex_search_services[CORTEX_SEARCH_SERVICE]
+
 
 model_names= session.sql('SELECT MODEL FROM MODEL_PRICING order by CREDITS_PER_MILLION_TOKENS ').to_pandas()
 
@@ -35,7 +55,7 @@ st.sidebar.write(tokens,'credits will be consumed per 1M tokens.')
 year = st.slider(
     "Select year!",
     min_value=2020,
-    max_value=2023,
+    max_value=2022,
     value=2021,
     help="Use this to enter the year for which you want to see chargebacks.",
 )
@@ -54,7 +74,7 @@ with st.expander("Click to see insight on above data"):
 
 
 
-with st.expander("Click to see Monthly Trends"):
+with st.expander("Click to see Yearly Trends"):
     sql2=f"""
     SELECT
     TO_CHAR(CHARGEBACK_DATE, 'YYYY') AS year,
@@ -71,7 +91,7 @@ with st.expander("Click to see Monthly Trends"):
         "SQL Query"
     ])
 
-    st.subheader("Monthly Trends :calendar:")
+    st.subheader("Yearly Trends :calendar:")
     with value_chart_tab:
         st.line_chart(monthly_trends, x='YEAR', y='CHARGEBACK_COUNT', color='DISPUTE_TYPE')
     with value_dataframe_tab:
@@ -80,12 +100,17 @@ with st.expander("Click to see Monthly Trends"):
         code(sql2)
 
 st.subheader("Classifying the Disputes:")
-st.markdown("You can see who might be responsible for future chargbacks.")
+st.markdown("You can see who might be responsible for future chargbacks. We'll be predicting on 2023 data.")
 sql3= f"""
-        SELECT * FROM CHARGEBACK_PREDICTED_OUTCOME3;
+        SELECT * FROM DISPUTE_OUTCOME;
     """
-prediction= session.sql(sql3).to_pandas()
-st.dataframe(prediction)
+disputes= session.sql(sql3).to_pandas()
+st.dataframe(disputes)
+
+sql4= f"""
+        SELECT * FROM CORTEX_POC.DISPUTE.CHARGEBACK_PREDICTED_OUTCOME3;
+    """
+prediction= session.sql(sql4).to_pandas()
 if st.button("Visualize the Prediction :pushpin:"):
 
     # Streamlit application
@@ -144,24 +169,306 @@ if st.button("Visualize the Prediction :pushpin:"):
     }
     st.vega_lite_chart(reasons_bar_chart,use_container_width=True)
 
-    
-    # Use Case 4: Trends Over Time
-    st.subheader("4: Chargeback Trends Over Time")
-    prediction['CHARGEBACK_DATE'] = prediction['CHARGEBACK_DATE'].dt.date
-    trends = prediction.groupby(['CHARGEBACK_DATE', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
-    st.vega_lite_chart(
-        trends,
-        {
-            "mark": "area",
-            "encoding": {
-                "x": {"field": "CHARGEBACK_DATE", "type": "temporal"},
-                "y": {"field": "Count", "type": "quantitative"},
-                "color": {"field": "LIABLE_FOR_DISPUTE", "type": "nominal"},
-                "stroke": {"field": "LIABLE_FOR_DISPUTE", "type": "nominal"}
-            }
-        },
-        use_container_width=True
+st.title("Chargeback: Historical Trend Analysis")
+
+def format_sql(sql):
+    # Remove padded space so that it looks good in code and in the ui element
+    return sql.replace("\n        ", "\n")
+
+
+def disputes_by_member_chart():
+    # SQL query to count the number of disputes each member has in each year
+    sql = f"""
+    SELECT
+        customer_id,
+        YEAR(date_trunc('year', chargeback_date)) AS chargeback_year,
+        count(dispute_id) as yearly_dispute_count,
+    FROM dispute_data2
+    where chargeback_year<>'2023'
+    group by customer_id,chargeback_year
+    ORDER BY customer_id, chargeback_year;
+    ;
+    """
+    # Execute the SQL query and convert to a pandas DataFrame
+    disputes_data = session.sql(sql).to_pandas()
+    # Render the title and description in the Streamlit app
+    st.subheader("**Number of Disputes per Member by Year**")
+    # st.dataframe(disputes_data, use_container_width=True)
+    # Set up tabs for chart, raw data, and SQL query visibility
+    value_chart_tab, value_dataframe_tab, value_query_tab = st.tabs(
+        [
+            "Chart",
+            "Raw Data",
+            "SQL Query",
+        ],
     )
+    with value_chart_tab:
+
+
+        # st.markdown("**Members Raising Frequent Disputes in the Past**")
+        # st.vega_lite_chart(bar_chart_spec, use_container_width=True, theme="streamlit")
+        # st.bar_chart(data=disputes_data, x="CUSTOMER_ID", y="YEARLY_DISPUTE_COUNT")
+        # Visualize the data using a Vega-Lite line chart
+
+
+         # Prepare data for the bar chart visualizing yearly dispute counts
+        status_distribution = (
+            disputes_data.groupby(['CHARGEBACK_YEAR', 'CUSTOMER_ID'])['YEARLY_DISPUTE_COUNT']
+            .sum()
+            .reset_index()
+        )
+
+        # Create Bar Chart using Vega-Lite
+        bar_chart_spec = {
+            "mark": "bar",
+            "encoding": {
+                "x": {
+                    "field": "CUSTOMER_ID",
+                    "type": "ordinal",  # Treat year as ordinal
+                    "title": "Members",
+                },
+                "y": {
+                    "field": "YEARLY_DISPUTE_COUNT",
+                    "type": "quantitative",
+                    "title": "Total Yearly Dispute Count",
+                },
+                "color": {
+                    "field": "CHARGEBACK_YEAR",
+                    "type": "nominal",
+                    "scale": {"scheme": "category10"},  # Using a categorical color scheme
+                },
+                "tooltip": [
+                    {"field": "CUSTOMER_ID", "title": "Member ID"},
+                    {"field": "CHARGEBACK_YEAR", "title": "Year"},
+                    {"field": "YEARLY_DISPUTE_COUNT", "title": "Count"},
+                ]
+            },
+            "width": 700,
+            "height": 400
+        }
+
+        # Display the bar chart for yearly dispute counts
+        st.markdown("**Yearly Dispute Counts by Member ID**")
+        st.vega_lite_chart(data=status_distribution, spec=bar_chart_spec, use_container_width=True)
+
+
+
+    with value_dataframe_tab:
+        st.dataframe(disputes_data, use_container_width=True)
+        # Display the raw dispute data in a DataFrame
+
+
+    with value_query_tab:
+        # Show the SQL query used to get the data
+        st.code(format_sql(sql), "sql")
+
+disputes_by_member_chart()
+
+def display_grouped_bar_chart_all_cust():
+
+    sql= f"""
+    SELECT customer_id, dispute_type, chargeback_date FROM dispute_data2
+    """
+
+    valid_df = session.sql(sql).to_pandas()
+    
+    # Group the data and create a stacked bar chart using Plotly
+    grouped_data = valid_df.groupby(['CUSTOMER_ID', 'DISPUTE_TYPE']).size().unstack(fill_value=0)
+    fig = px.bar(grouped_data, barmode='stack', labels={'index': 'CUSTOMER_ID', 'value': 'Count'},
+                 title='Count of Occurrences - CUSTOMER_ID vs DISPUTE_TYPE')
+    fig.update_layout(legend_title_text='DISPUTE_TYPE')
+    st.set_option('deprecation.showPyplotGlobalUse', False)
+    st.plotly_chart(fig)
+
+
+# Run the Streamlit app
+if __name__ == '__main__':
+    display_grouped_bar_chart_all_cust()
+
+session = get_active_session()
+
+sql= f"""
+    select * from dispute_data_view where dispute_status in ('Valid')
+    """
+
+valid_df = session.sql(sql).to_pandas()
+
+st.title("Valid Customer Chargeback")
+st.dataframe(valid_df)
+
+def disputes_valid_invalid(session):
+    # SQL query to aggregate dispute data by customer
+    sql = """
+        WITH DisputeDetails AS (
+        SELECT 
+            Customer_ID,
+            COUNT(DISPUTE_ID) AS Number_Of_Disputes,
+            SUM(CASE 
+                WHEN FRAUD_INDICATOR='TRUE' THEN 1
+                ELSE 0 
+            END) AS Valid_Disputes,
+            SUM(CASE 
+                WHEN  FRAUD_INDICATOR='FALSE' THEN 1
+                ELSE 0 
+            END) AS Invalid_Disputes
+        FROM 
+            dispute_data2
+            where    
+            year(chargeback_date)<>'2023'
+        GROUP BY 
+            Customer_ID
+    ),
+    SuspiciousCustomers AS (
+        SELECT 
+            Customer_ID,
+            Number_Of_Disputes,
+            Valid_Disputes,
+            Invalid_Disputes,
+            CASE 
+                WHEN Number_Of_Disputes > 15 THEN 'High Frequency'    
+                WHEN Number_Of_Disputes BETWEEN 10 AND 15 THEN 'Moderate Frequency' 
+                ELSE 'Low Frequency'  
+            END AS Frequency_level
+        FROM 
+            DisputeDetails
+    )
+    SELECT 
+        Customer_ID,
+        Number_Of_Disputes,
+        Frequency_level,
+        Valid_Disputes,
+        Invalid_Disputes
+    FROM 
+        SuspiciousCustomers;
+    """
+
+    # Execute the SQL query and convert to a pandas DataFrame
+    disputes_data = session.sql(sql).to_pandas()
+    # Render the title and description in the Streamlit app
+    st.subheader("**Dispute Status per Member**")
+    # st.dataframe(disputes_data, use_container_width=True)
+    # Set up tabs for chart, raw data, and SQL query visibility
+    value_chart_tab, value_dataframe_tab, value_query_tab = st.tabs(
+        ["Chart", "Raw Data", "SQL Query"]
+    )
+    with value_chart_tab:
+        # Prepare data for visualization
+        # Melting the DataFrame to have valid and invalid disputes in long format for better visualization
+        status_distribution = disputes_data.melt(
+            id_vars="CUSTOMER_ID", 
+            value_vars=["VALID_DISPUTES", "INVALID_DISPUTES"], 
+            var_name="DISPUTE_STATUS", 
+            value_name="COUNT"
+        )
+        # Create Bar Chart using Altair / Vega-Lite
+        bar_chart_spec = {
+            "mark": "bar",
+            "encoding": {
+                "x": {
+                    "field": "CUSTOMER_ID",
+                    "type": "ordinal",  # Treat customer as ordinal
+                    "title": "Customer ID",
+                },
+                "y": {
+                    "field": "COUNT",
+                    "type": "quantitative",
+                    "title": "Dispute Count",
+                },
+                "color": {
+                    "field": "DISPUTE_STATUS",
+                    "type": "nominal",
+                    "scale": {"scheme": "category10"},  # Categorical color scheme
+                },
+                "tooltip": [
+                    {"field": "CUSTOMER_ID", "title": "Customer ID"},
+                    {"field": "DISPUTE_STATUS", "title": "Status"},
+                    {"field": "COUNT", "title": "Count"},
+                ]
+            },
+            "width": 700,
+            "height": 400
+        }
+        # Display the bar chart for valid and invalid disputes
+        st.markdown("**Valid and Invalid Disputes by Customer ID**")
+        st.vega_lite_chart(data=status_distribution, spec=bar_chart_spec, use_container_width=True)
+    with value_dataframe_tab:
+        st.dataframe(disputes_data, use_container_width=True)  # Display the raw dispute data in a DataFrame
+    with value_query_tab:
+        st.code(sql, "sql")
+
+disputes_valid_invalid(session)
+
+def display_grouped_bar_chart():
+
+    sql= f"""
+    select * from DISPUTE_DATA_VIEW  where dispute_status in ('Valid')
+    """
+
+    valid_df = session.sql(sql).to_pandas()
+    
+    # Group the data and create a stacked bar chart using Plotly
+    grouped_data = valid_df.groupby(['CUSTOMER_ID', 'DISPUTE_TYPE']).size().unstack(fill_value=0)
+    fig = px.bar(grouped_data, barmode='stack', labels={'index': 'CUSTOMER_ID', 'value': 'Count'},
+                 title='Count of Occurrences - CUSTOMER_ID vs DISPUTE_TYPE')
+    fig.update_layout(legend_title_text='DISPUTE_TYPE')
+    st.set_option('deprecation.showPyplotGlobalUse', False)
+    st.plotly_chart(fig)
+
+
+# Run the Streamlit app
+if __name__ == '__main__':
+    display_grouped_bar_chart()
+
+sql1= f"""
+    with disputes as  (
+    select  customer_id, dispute_type, count(*) as counts
+    from dispute_data_view 
+    where dispute_status in ('Valid')
+    group by customer_id, dispute_type
+    -- order by counts desc
+    -- limit 3
+    ),
+    agg_disputes as(
+    select listagg(customer_id ||':'||dispute_type || ', count-'||counts,'; ') 
+        within group (order by customer_id, dispute_type) as aggs
+    from disputes 
+    ),
+    summ as 
+    (
+    select concat(
+    'You are provided with a dataset of customer chargebacks. Your task is to analyze this dataset and generate a detailed report covering several aspects. Follow the steps below to perform the analysis and compile the report:',
+    
+    '1: Customer Chargebacks
+    --Identify which customer_id has filed the highest number of chargebacks.
+    --Provide the total count of chargebacks for this customer and specify the most common dispute_type filed by this customer.',
+    
+    '2: Dispute Type Analysis
+    --Determine the dispute_type that has the highest number of filings across all records.
+    --Include the total count of chargebacks for this most common dispute type.',
+    
+    '3: Summary
+    --Summarize your findings, highlighting any notable trends or patterns in the chargeback data.',
+    
+    '4: Potential Implications
+    --Discuss how the chargeback behavior of the identified customer and the most common dispute types affect the business based on your findings.',
+    
+    '5: Future Trend
+    --Based on the analysis, predict the future trend regarding which customer is more likely to file the highest chargeback and on which dispute type in the next three years.',
+    
+    'here are the aggregated customer_ids and their dispute types:',aggs
+    ) as prompt from agg_disputes
+    )
+    select snowflake.cortex.complete(?,prompt) from summ;
+    """
+
+summary_df = session.sql(sql1, params=[model]).to_pandas()
+
+summary_text = summary_df.iloc[0][0]  
+
+st.title("Analysis")
+st.text_area("Overall analysis on disputes filled by a customer", value=summary_text, height=700)
+
+
 
 st.title("High Rejection Rate :crossed_swords:")
 st.subheader(
@@ -177,7 +484,7 @@ session = get_active_session()
 
 sql=f"""
             SELECT 
-            * from DISPUTE_DATA;
+            * from DISPUTE_OUTCOME WHERE STATUS='Rejected';
     """
 data = session.sql(sql).to_pandas()
 st.dataframe(data)
@@ -252,11 +559,210 @@ if selected_dispute_id:
         st.header("Recommended way to resolve the dispute:")
         st.markdown(response[0].RESPONSE)
 
-    cmd = f"""
+
+
+def config_options():
+    events = session.sql("SELECT DISTINCT dispute_type FROM DISPUTE_DATA;").collect()
+    
+    # Create a list of dispute types to choose from, including 'ALL'
+    events_list = ['ALL'] + [event.DISPUTE_TYPE for event in events]  # Added 'ALL' option
+    
+    # Select box for choosing a dispute type (required)
+    selected_event = st.selectbox('Looking for any specific dispute type?', events_list, key="event_value")
+    
+    # Multi-select for choosing columns to filter on (required)
+    selected_column = st.multiselect('Select columns to filter on:', ['STATUS', 'PRODUCT_TYPE']) 
+    
+    # Check if selection for columns has been made
+    if not selected_column:
+        st.error("Please select at least one column to filter on.")
+        return None, None, None, None  # Return None to indicate failure
+    
+    # For all selected columns, fetch unique values
+    unique_values_dict = {}
+    for column in selected_column:
+        if column:  # Ensure a valid column is selected
+            unique_values = session.sql(f"SELECT DISTINCT {column} FROM DISPUTE_DATA;").collect()
+            unique_values_dict[column] = [value[0] for value in unique_values] if unique_values else []
+    
+    # Create a multiselect for each selected column to filter values
+    selected_values = {}
+    for column, values in unique_values_dict.items():
+        selected_values[column] = st.selectbox(f'Select values for **{column}**', values)
+        
+        # If PRODUCT_TYPE is selected but no values are chosen, display an error:
+        if column == 'PRODUCT_TYPE' and not selected_values[column]:
+            st.error("Please select at least one value for PRODUCT_TYPE.")
+    
+    # Number input for limit shown only if at least one column is selected
+    limit = None
+    if selected_column:
+        limit = st.number_input("Enter the number of records to fetch:", min_value=1000, value=1000, key="record_limit")
+    
+    return selected_event, selected_column, selected_values, limit
+    
+# def get_summary_cost():
+#     # Execute the SQL query to get summary costs
+#     query = """
+#     SELECT 'SUMMARIZE' AS FUNCTION,
+#            SUM(TOKENS) AS TOTAL_TOKENS,
+#            SUM(TOKENS)/1000000 AS TOTAL_TOKENS_FOR_CREDITS,
+#            (SUM(TOKENS)/1000000) * 0.10 AS CREDITS_BILLED,
+#            (SUM(TOKENS)/1000000) * 0.10 * 3 AS TOTAL_COST_USD
+#     FROM (
+#         SELECT DISPUTE_ID, CUSTOMER_STATEMENT,
+#                SNOWFLAKE.CORTEX.SUMMARIZE(CUSTOMER_STATEMENT) AS SUMMARY,
+#                SNOWFLAKE.CORTEX.COUNT_TOKENS('summarize', CUSTOMER_STATEMENT) AS TOKENS
+#         FROM DISPUTE_DATA
+#     )
+#     """
+    
+#     # Return the result as a DataFrame
+#     result = session.sql(query).collect()
+#     return result[0] if result else None
+    
+def get_all_similar_events_search_service(selected_event, selected_column, selected_values, limit):
+    all_records = []
+    
+    # If selected_event is 'ALL', fetch all records for all dispute types
+    if selected_event == 'ALL':
+        response = cortex_search_service.search("*", COLUMNS, limit=limit)
+    else:
+        # Filter for the selected dispute type
+        filter_obj = {"@eq": {"dispute_type": selected_event}}
+        response = cortex_search_service.search("*", COLUMNS, filter=filter_obj, limit=limit)
+    
+    # Add fetched records to the list
+    all_records.extend(response.results)
+    
+    # Count the available records
+    available_records_count = len(all_records)
+    
+    # If the available records are fewer than the requested limit, adjust the limit
+    if available_records_count < limit:
+        limit = available_records_count  # Set limit to the number of available records
+    
+    # Filter results based on the selected columns and values
+    filtered_records = []
+    if selected_values:
+        filtered_records = all_records  # Start with all records
+        for column in selected_column:
+            if selected_values[column]:  # Ensure at least one value is selected
+                # Filter for records matching the selected values in the respective column
+                filtered_records = [record for record in filtered_records if record[column] in selected_values[column]]
+    else:
+        filtered_records = all_records  # No filtering if no values selected
+    
+    # Return only the top 'limit' number of records
+    return filtered_records[:limit]  # Return only the number of records specified by the limit
+    
+def generate_recommended_resolution(customer_statement):
+    # Create a prompt for the model to generate a recommended resolution
+    prompt = (
+    "As a skilled dispute resolver, your task is to create a clear and structured resolution that helps the merchant/seller rectify the issue outlined in the customer statement by considering the selected PRODUCT_TYPE and STATUS. Analyze the following customer statement carefully, which expresses the customer's concerns and feelings:\n\n"
+    f"{customer_statement}\n\n"
+    "Consider the context of the situation and think about potential resolutions that could effectively address the customer's concerns. Your recommendations should be aimed at resolving the current dispute and providing insights to help the merchant/seller improve their operations, enhance customer satisfaction, and reduce future disputes. Please present your recommendations in a clear, point-wise format:\n"
+    "1. **Suggested Resolution:** Begin with an apology for the inconvenience caused, acknowledging the customer's feelings, and outline specific resolutions to address their issues in point-wise format.\n"
+    "2. **Future Improvement:** Offer actionable strategies to improve operations, enhance customer satisfaction, and prevent similar issues from occurring in the future, along with clear instructions for relevant internal departments in point-wise format.\n"
+    "3. [Continue listing additional recommendations as necessary.]\n\n"
+    "Ensure that your recommendations include explanations of how each action addresses the customer's concerns and insights for future improvement. Its mandatory to follow the above format with the headings (**Suggested Resolution:** and **Future Improvement:**) mentioned accurately"
+   )
+
+    
+    resolution = Summarize(prompt)
+    return resolution
+
+def main():
+    st.title("Automated Summarization for Dispute Investigations🔍📝")
+    st.write("Welcome to the search service! Search for disputes and apply filters.")
+    
+    # Get summary cost information
+    # summary_cost_info = get_summary_cost()
+    
+    # if summary_cost_info:
+    #     st.markdown(
+    #         f"""
+            
+    #         Total Cost (USD) Incurred : `${summary_cost_info.TOTAL_COST_USD:.2f}`
+            # """)
+    st.markdown(f"Querying service: `{CORTEX_SEARCH_DATABASE}.{CORTEX_SEARCH_SCHEMA}.{CORTEX_SEARCH_SERVICE}`".replace('"', ''))
+    
+    selected_event, selected_column, selected_values, limit = config_options()
+    
+    # Validate selections
+    if selected_event is None or selected_event == '':
+        return  # Exit the function if the dropdown is not valid
+    if selected_column is None:  # Check if config_options returned None due to validation
+        return  # Exit the function
+    # Check if PRODUCT_TYPE selection is required
+    if 'PRODUCT_TYPE' in selected_column and not selected_values.get('PRODUCT_TYPE'):
+        return  # Exit the function if no values are selected for PRODUCT_TYPE
+    
+    if selected_event:
+        # Fetch and display results
+        response = get_all_similar_events_search_service(selected_event, selected_column, selected_values, limit)
+        results_df = pd.DataFrame(response)
+        
+        if results_df.empty:
+            st.write("No records found.")
+        else:
+            # Reorder DataFrame columns
+            results_df = results_df[COLUMNS]  # Ensure the DataFrame is in the preferred column order
+            
+            st.write("Results")
+            st.dataframe(results_df)  # Display the full results in a DataFrame
+            
+            # Generate summary for the entire CUSTOMER_STATEMENT column
+            if 'CUSTOMER_STATEMENT' in results_df.columns:
+                combined_statements = " ".join(results_df['CUSTOMER_STATEMENT'].astype(str).tolist())  # Concatenate all statements
+                summary = Summarize(combined_statements)  # Generate a summary for concatenated customer statements
+                
+                # Display the summary
+                st.subheader("Consolidated Summary📌")
+                st.write(summary)
+                
+                # Button to view recommended resolution
+                if st.button("Want Recommended Resolution?🗣️"):
+                    resolution = generate_recommended_resolution(combined_statements)  # Generate the resolution
+                    st.subheader("Recommended Resolution:")
+                    st.write(resolution)
+            else:
+                st.error("Customer statement column not found in the results.")
+            
+            # Create a dropdown for dispute IDs from the result set
+            dispute_ids = results_df['DISPUTE_ID'].unique().tolist()  # Get unique DISPUTE_IDs
+            dispute_ids.sort()
+            selected_dispute_id = st.selectbox("Select a DISPUTE_ID for more information:", options=[""] + dispute_ids, index=0)
+            
+            # Optionally, display additional information for the selected DISPUTE_ID
+            if selected_dispute_id:
+                selected_record = results_df[results_df['DISPUTE_ID'] == selected_dispute_id]
+                st.markdown(f"Detailed Information for DISPUTE_ID: **{selected_dispute_id}**")
+                
+                # Transpose the DataFrame to display DISPUTE_ID as column
+                transposed_record = selected_record.T
+                st.dataframe(transposed_record)  # Display transposed details for the selected DISPUTE_ID
+                
+                # Retrieve and summarize the CUSTOMER_STATEMENT for the selected DISPUTE_ID
+                if 'CUSTOMER_STATEMENT' in selected_record.columns:
+                    customer_statement = selected_record['CUSTOMER_STATEMENT'].values[0]  # Assume only one row
+                    
+                    # Generate summary using the Summarize function
+                    statement_summary = Summarize(customer_statement)
+                    
+                    # Display the summary
+                    st.subheader("Summary selected DISPUTE_ID✍🏽")
+                    st.write(statement_summary)
+                else:
+                    st.error("Customer statement not found in the selected record.")
+
+        cmd = f"""
         SELECT 'COMPLETE' AS FUNCTION, ? as MODEL, SUM(TOKENS) AS TOTAL_TOKENS,
                SUM(TOKENS)/1000000 AS TOTAL_TOKENS_FOR_CREDITS,
                (SUM(TOKENS) / 1000000) * 0.22 AS CREDITS_BILLED,
-               CREDITS_BILLED * 3 AS TOTAL_COST_USD
+               CREDITS_BILLED * 3 AS COST_USD,
+               2 as TIMES_USED,
+               2 * COST_USD AS TOTAL_COST_USD
         FROM (
             SELECT DISPUTE_ID, CUSTOMER_STATEMENT,
                    CONCAT(
@@ -265,35 +771,43 @@ if selected_dispute_id:
                    ) AS prompt,
                    SNOWFLAKE.CORTEX.COUNT_TOKENS(?, prompt) AS TOKENS
             FROM DISPUTE_OUTCOME
-            WHERE STATUS = 'Rejected'
+            
         ) 
         UNION
         SELECT 'SUMMARIZE' AS FUNCTION, ? AS MODEL, SUM(TOKENS) AS TOTAL_TOKENS,
                SUM(TOKENS)/1000000 AS TOTAL_TOKENS_FOR_CREDITS,
                (SUM(TOKENS) / 1000000) * 0.10 AS CREDITS_BILLED,
-               CREDITS_BILLED * 3 AS TOTAL_COST_USD
+               CREDITS_BILLED * 3 AS COST_USD,
+               4 as TIMES_USED,
+               4*COST_USD AS TOTAL_COST_USD
         FROM (
             SELECT DISPUTE_ID, CUSTOMER_STATEMENT,
                    SNOWFLAKE.CORTEX.COUNT_TOKENS('summarize', CUSTOMER_STATEMENT) AS TOKENS
             FROM DISPUTE_OUTCOME
-            WHERE STATUS = 'Rejected'
+           
         ) 
         UNION
         SELECT 'SENTIMENT' AS FUNCTION, ? AS MODEL, SUM(TOKENS) AS TOTAL_TOKENS,
                SUM(TOKENS)/1000000 AS TOTAL_TOKENS_FOR_CREDITS,
                (SUM(TOKENS) / 1000000) * 0.08 AS CREDITS_BILLED,
-               CREDITS_BILLED * 3 AS TOTAL_COST_USD
+               CREDITS_BILLED * 3 AS COST_USD,
+               1 as TIMES_USED,
+               1 * COST_USD AS TOTAL_COST_USD
         FROM 
         (
             SELECT DISPUTE_ID, CUSTOMER_STATEMENT,
                    SNOWFLAKE.CORTEX.COUNT_TOKENS('sentiment', CUSTOMER_STATEMENT) AS TOKENS
             FROM DISPUTE_OUTCOME
-            WHERE STATUS = 'Rejected'
+            
         ) 
     """
     # Assuming you have already set the 'model' variable properly
     credits_spent = session.sql(cmd, params=[model, model, model, model]).to_pandas()
-    st.subheader("What will be the maximum cost incurred?")
-    st.write("We're taking only rejected disputes into account for calculation of pricing.")
+    st.subheader("What will be the cost incurred?")
+    st.write("We've calculated estimated pricing for the application.")
     st.dataframe(credits_spent)
 
+
+
+if __name__ == "__main__":
+    main()
