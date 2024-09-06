@@ -2,7 +2,7 @@
 Welcome to the **Powered by Tasty Bytes** repository, where we will guide you through building a Cortex LLM-powered chatbot designed to help Tasty Bytes agents find answers to customer questions more efficiently. 
 This chatbot leverages **Retrieval-Augmented Generation (RAG)** by retrieving previous agent support chat logs and relevant public-facing documents (such as Annual Reports and FAQs).
 
-![Chatbot Overview](![tasty_bytes_rag](image.png)) <!-- Replace with your chatbot overview image -->
+![Chatbot Overview](image.png) <!-- Replace with your chatbot overview image -->
 ## 📚 What You'll Learn
 By following this quickstart guide, you will learn:
 - How to build a chatbot using **Cortex LLMs**.
