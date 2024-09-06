@@ -1,5 +1,6 @@
-# AI-Enhanced Open Data Lakehouse with Snowflake Cortex AI and Iceberg Tables
-## 🌟 Overview
+# AI-Enhanced Open Data Lakehouse 
+## Sentiment Analysis Using ❄️ Snowflake Cortex AI on Iceberg Tables
+## 🧊 Overview
 This repository contains a comprehensive guide to integrating artificial intelligence (AI) into open data lakehouses using Snowflake Cortex AI and Apache Iceberg tables. With the recent advancements in Snowflake, including the general availability of Snowflake Cortex AI and Iceberg tables, this repository aims to equip you with the necessary knowledge and tools to build and automate your open data lakehouse.
 ## 🔧 Features
 - Creation and management of Iceberg Tables in Snowflake.
