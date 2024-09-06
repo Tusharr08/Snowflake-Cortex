@@ -79,7 +79,7 @@ with st.expander("Click to see Yearly Trends"):
     SELECT
     TO_CHAR(CHARGEBACK_DATE, 'YYYY') AS year,
     DISPUTE_TYPE,
-    COUNT(*) AS chargeback_count
+    COUNT(*) AS DISPUTE_COUNT
     FROM DISPUTE_DATA WHERE EXTRACT(YEAR FROM CHARGEBACK_DATE) >=2020 and EXTRACT(YEAR FROM CHARGEBACK_DATE)<={year}
     GROUP BY 1, 2
     ORDER BY 1;
@@ -93,7 +93,7 @@ with st.expander("Click to see Yearly Trends"):
 
     st.subheader("Yearly Trends :calendar:")
     with value_chart_tab:
-        st.line_chart(monthly_trends, x='YEAR', y='CHARGEBACK_COUNT', color='DISPUTE_TYPE')
+        st.line_chart(monthly_trends, x='YEAR', y='DISPUTE_COUNT', color='DISPUTE_TYPE')
     with value_dataframe_tab:
         st.dataframe(monthly_trends)
     with value_query_tab:
@@ -107,18 +107,15 @@ sql3= f"""
 disputes= session.sql(sql3).to_pandas()
 st.dataframe(disputes)
 
-sql4= f"""
-        SELECT * FROM CORTEX_POC.DISPUTE.CHARGEBACK_PREDICTED_OUTCOME3;
-    """
-prediction= session.sql(sql4).to_pandas()
 if st.button("Visualize the Prediction :pushpin:"):
 
     # Streamlit application
     st.header("Chargeback Predictive Analysis")
     # Use Case 1: Distribution of Dispute Liability
     st.subheader("1: Distribution of Dispute Liability")
-    liability_counts = prediction['LIABLE_FOR_DISPUTE'].value_counts().reset_index()
-    liability_counts.columns = ['Liable For Dispute', 'Count']
+    
+    liability_counts = disputes['LIABLE_FOR_DISPUTE'].value_counts().reset_index()
+    liability_counts.columns = ['Liable_For_Dispute', 'Count']
     # Create a vega-lite chart for the pie chart
     liability_pie_chart = {
         "data": {
@@ -127,7 +124,7 @@ if st.button("Visualize the Prediction :pushpin:"):
         "mark": "arc",
         "encoding": {
             "theta": {"field": "Count", "type": "quantitative"},
-            "color": {"field": "Liable For Dispute", "type": "nominal"}
+            "color": {"field": "Liable_For_Dispute", "type": "nominal"}
         }
     }
     st.vega_lite_chart(liability_pie_chart, use_container_width=True)
@@ -135,7 +132,7 @@ if st.button("Visualize the Prediction :pushpin:"):
     
     st.subheader("2: Product Type Distribution")
     # Aggregate the data to count outcomes by MEMBER_DOCUMENTATION
-    outcomes_count = prediction.groupby(['MERCHANT_CATEGORY', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
+    outcomes_count = disputes.groupby(['PRODUCT_TYPE', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
     # Create a stacked bar chart with Vega-Lite
     stacked_bar_chart = {
         "data": {
@@ -143,7 +140,7 @@ if st.button("Visualize the Prediction :pushpin:"):
         },
         "mark": "bar",
         "encoding": {
-            "x": {"field": "MERCHANT_CATEGORY","title":"Product Type", "type": "nominal", "axis": {"labelAngle": -45}},
+            "x": {"field": "PRODUCT_TYPE","title":"Product Type", "type": "nominal", "axis": {"labelAngle": -45}},
             "y": {"field": "Count", "type": "quantitative"},
             "color": {"field": "LIABLE_FOR_DISPUTE", "type": "nominal", "scale": {"scheme": "category10"}}
         },
@@ -154,7 +151,7 @@ if st.button("Visualize the Prediction :pushpin:"):
 
     # Use Case 2: Chargeback Reasons Distribution
     st.subheader("3: Dispute Type Distribution")
-    reason_counts = prediction.groupby(['CHARGEBACK_REASON', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
+    reason_counts = disputes.groupby(['DISPUTE_TYPE', 'LIABLE_FOR_DISPUTE']).size().reset_index(name='Count')
 
     reasons_bar_chart = {
         "data": {
@@ -162,7 +159,7 @@ if st.button("Visualize the Prediction :pushpin:"):
         },
         "mark": "bar",
         "encoding": {
-            "x": {"field": "CHARGEBACK_REASON", "title":"Dispute Type","type": "nominal", "axis": {"labelAngle": -45}},
+            "x": {"field": "DISPUTE_TYPE", "title":"Dispute Type","type": "nominal", "axis": {"labelAngle": -45}},
             "y": {"field": "Count", "type": "quantitative"},
             "color": {"field": "LIABLE_FOR_DISPUTE", "type": "nominal", "scale": {"scheme": "category10"}}
         }
@@ -180,44 +177,34 @@ def disputes_by_member_chart():
     # SQL query to count the number of disputes each member has in each year
     sql = f"""
     SELECT
-        customer_id,
-        YEAR(date_trunc('year', chargeback_date)) AS chargeback_year,
-        count(dispute_id) as yearly_dispute_count,
-    FROM dispute_data2
-    where chargeback_year<>'2023'
-    group by customer_id,chargeback_year
-    ORDER BY customer_id, chargeback_year;
+        CUSTOMER_ID,
+        YEAR(date_trunc('year', chargeback_date)) AS CHARGEBACK_YEAR,
+        count(dispute_id) as YEARLY_DISPUTE_COUNT,
+    FROM dispute_data
+    where CHARGEBACK_YEAR<>'2023'
+    group by CUSTOMER_ID,CHARGEBACK_YEAR
+    ORDER BY CUSTOMER_ID, CHARGEBACK_YEAR;
     ;
     """
     # Execute the SQL query and convert to a pandas DataFrame
     disputes_data = session.sql(sql).to_pandas()
     # Render the title and description in the Streamlit app
     st.subheader("**Number of Disputes per Member by Year**")
-    # st.dataframe(disputes_data, use_container_width=True)
     # Set up tabs for chart, raw data, and SQL query visibility
-    value_chart_tab, value_dataframe_tab, value_query_tab = st.tabs(
+    value_dataframe_tab,value_chart_tab, value_query_tab = st.tabs(
         [
-            "Chart",
             "Raw Data",
+            "Chart",
             "SQL Query",
         ],
     )
     with value_chart_tab:
-
-
-        # st.markdown("**Members Raising Frequent Disputes in the Past**")
-        # st.vega_lite_chart(bar_chart_spec, use_container_width=True, theme="streamlit")
-        # st.bar_chart(data=disputes_data, x="CUSTOMER_ID", y="YEARLY_DISPUTE_COUNT")
-        # Visualize the data using a Vega-Lite line chart
-
-
          # Prepare data for the bar chart visualizing yearly dispute counts
         status_distribution = (
             disputes_data.groupby(['CHARGEBACK_YEAR', 'CUSTOMER_ID'])['YEARLY_DISPUTE_COUNT']
             .sum()
             .reset_index()
         )
-
         # Create Bar Chart using Vega-Lite
         bar_chart_spec = {
             "mark": "bar",
@@ -246,110 +233,182 @@ def disputes_by_member_chart():
             "width": 700,
             "height": 400
         }
-
         # Display the bar chart for yearly dispute counts
         st.markdown("**Yearly Dispute Counts by Member ID**")
         st.vega_lite_chart(data=status_distribution, spec=bar_chart_spec, use_container_width=True)
-
-
-
+ 
+        
     with value_dataframe_tab:
         st.dataframe(disputes_data, use_container_width=True)
         # Display the raw dispute data in a DataFrame
 
-
     with value_query_tab:
         # Show the SQL query used to get the data
         st.code(format_sql(sql), "sql")
-
+ 
+    sql = f"""
+    SELECT
+        CUSTOMER_ID,
+        YEAR(date_trunc('year', chargeback_date)) AS CHARGEBACK_YEAR,
+        COUNT(dispute_id) AS YEARLY_DISPUTE_COUNT
+    FROM dispute_data
+    GROUP BY CUSTOMER_ID, CHARGEBACK_YEAR
+    ORDER BY YEARLY_DISPUTE_COUNT DESC
+    LIMIT 25;  
+"""
+    # Execute the SQL query and convert to a pandas DataFrame
+    disputes_data = session.sql(sql).to_pandas()
+    # Render the title and description in the Streamlit app
+    st.subheader("**Top 25 Customers Raising Maximum Disputes**")
+    # st.dataframe(disputes_data, use_container_width=True)
+    # Set up tabs for chart, raw data, and SQL query visibility
+    value_chart_tab, value_dataframe_tab, value_query_tab = st.tabs(
+    [
+    "Chart",
+    "Raw Data",
+    "SQL Query",
+    ],
+    )
+    with value_dataframe_tab:
+        st.dataframe(disputes_data, use_container_width=True) 
+    with value_chart_tab:
+    # Prepare data for the bar chart visualizing yearly dispute counts
+        status_distribution = (
+        disputes_data.groupby(['CHARGEBACK_YEAR', 'CUSTOMER_ID'])['YEARLY_DISPUTE_COUNT']
+        .sum()
+        .reset_index()
+        )
+        # Create Bar Chart using Vega-Lite
+        bar_chart_spec = {
+        "mark": "bar",
+        "encoding": {
+        "x": {
+            "field": "CUSTOMER_ID",
+            "type": "ordinal",  # Treat CUSTOMER_ID as ordinal
+            "title": "Members",
+        },
+        "y": {
+            "field": "YEARLY_DISPUTE_COUNT",
+            "type": "quantitative",
+            "title": "Total Yearly Dispute Count",
+        },
+        "color": {
+            "field": "CHARGEBACK_YEAR",
+            "type": "nominal",
+            "scale": {"scheme": "category10"},  # Using a categorical color scheme
+        },
+        "tooltip": [
+            {"field": "CUSTOMER_ID", "title": "Customer ID"},
+            {"field": "CHARGEBACK_YEAR", "title": "Year"},
+            {"field": "YEARLY_DISPUTE_COUNT", "title": "Count"},
+        ]
+        },
+        "width": 700,
+        "height": 400
+        }
+        # Display the bar chart for yearly dispute counts
+        st.markdown("**Yearly Dispute Counts by Top Customer IDs**")
+        st.vega_lite_chart(data=status_distribution, spec=bar_chart_spec, use_container_width=True)
+    # Display the raw dispute data in a DataFrame
+    with value_query_tab:
+    # Show the SQL query used to get the data
+        st.code(format_sql(sql), "sql")
+ 
+ 
 disputes_by_member_chart()
 
-def display_grouped_bar_chart_all_cust():
+# def display_grouped_bar_chart_all_cust():
 
-    sql= f"""
-    SELECT customer_id, dispute_type, chargeback_date FROM dispute_data2
-    """
+#     sql= f"""
+#     SELECT customer_id, dispute_type, chargeback_date FROM dispute_data2
+#     """
 
-    valid_df = session.sql(sql).to_pandas()
+#     valid_df = session.sql(sql).to_pandas()
     
-    # Group the data and create a stacked bar chart using Plotly
-    grouped_data = valid_df.groupby(['CUSTOMER_ID', 'DISPUTE_TYPE']).size().unstack(fill_value=0)
-    fig = px.bar(grouped_data, barmode='stack', labels={'index': 'CUSTOMER_ID', 'value': 'Count'},
-                 title='Count of Occurrences - CUSTOMER_ID vs DISPUTE_TYPE')
-    fig.update_layout(legend_title_text='DISPUTE_TYPE')
-    st.set_option('deprecation.showPyplotGlobalUse', False)
-    st.plotly_chart(fig)
+#     # Group the data and create a stacked bar chart using Plotly
+#     grouped_data = valid_df.groupby(['CUSTOMER_ID', 'DISPUTE_TYPE']).size().unstack(fill_value=0)
+#     fig = px.bar(grouped_data, barmode='stack', labels={'index': 'CUSTOMER_ID', 'value': 'Count'},
+#                  title='Count of Occurrences - CUSTOMER_ID vs DISPUTE_TYPE')
+#     fig.update_layout(legend_title_text='DISPUTE_TYPE')
+#     st.set_option('deprecation.showPyplotGlobalUse', False)
+#     st.plotly_chart(fig)
 
 
-# Run the Streamlit app
-if __name__ == '__main__':
-    display_grouped_bar_chart_all_cust()
+# # Run the Streamlit app
+# if __name__ == '__main__':
+#     display_grouped_bar_chart_all_cust()
 
 session = get_active_session()
 
 sql= f"""
-    select * from dispute_data_view where dispute_status in ('Valid')
+    select * from dispute_data where fraud_indicator='FALSE' and customer_id in (select customer_id from top25customers) order by customer_id
     """
 
 valid_df = session.sql(sql).to_pandas()
 
-st.title("Valid Customer Chargeback")
-st.dataframe(valid_df)
 
-def disputes_valid_invalid(session):
-    # SQL query to aggregate dispute data by customer
+def disputes_valid_invalid():
+    # SQL query to count valid and invalid dispute data by customer
     sql = """
-        WITH DisputeDetails AS (
-        SELECT 
-            Customer_ID,
-            COUNT(DISPUTE_ID) AS Number_Of_Disputes,
-            SUM(CASE 
-                WHEN FRAUD_INDICATOR='TRUE' THEN 1
-                ELSE 0 
-            END) AS Valid_Disputes,
-            SUM(CASE 
-                WHEN  FRAUD_INDICATOR='FALSE' THEN 1
-                ELSE 0 
-            END) AS Invalid_Disputes
-        FROM 
-            dispute_data2
-            where    
-            year(chargeback_date)<>'2023'
-        GROUP BY 
-            Customer_ID
-    ),
-    SuspiciousCustomers AS (
-        SELECT 
-            Customer_ID,
-            Number_Of_Disputes,
-            Valid_Disputes,
-            Invalid_Disputes,
-            CASE 
-                WHEN Number_Of_Disputes > 15 THEN 'High Frequency'    
-                WHEN Number_Of_Disputes BETWEEN 10 AND 15 THEN 'Moderate Frequency' 
-                ELSE 'Low Frequency'  
-            END AS Frequency_level
-        FROM 
-            DisputeDetails
-    )
+         WITH DisputeDetails AS (
     SELECT 
-        Customer_ID,
-        Number_Of_Disputes,
-        Frequency_level,
-        Valid_Disputes,
-        Invalid_Disputes
+        CUSTOMER_ID,
+        COUNT(DISPUTE_ID) AS Number_Of_Disputes,
+        SUM(CASE 
+            WHEN FRAUD_INDICATOR='TRUE' THEN 1
+            ELSE 0 
+        END) AS Invalid_Disputes,
+        SUM(CASE 
+            WHEN  FRAUD_INDICATOR='FALSE' THEN 1
+            ELSE 0 
+        END) AS Valid_Disputes
     FROM 
-        SuspiciousCustomers;
-    """
+        dispute_data 
+        where    
+        year(chargeback_date)<>'2023' 
+        and customer_id in (select customer_id from top25customers)
+    GROUP BY 
+        CUSTOMER_ID
+),
+SuspiciousCustomers AS (
+    SELECT 
+        CUSTOMER_ID,
+        Number_Of_Disputes,
+        
+        Valid_Disputes,
+        Invalid_Disputes,
+        CASE 
+            WHEN Number_Of_Disputes > 15 THEN 'High Frequency'    
+            WHEN Number_Of_Disputes BETWEEN 10 AND 15 THEN 'Moderate Frequency' 
+            ELSE 'Low Frequency'  
+        END AS Frequency_level
+    FROM 
+        DisputeDetails
+)
+SELECT 
+    CUSTOMER_ID,
+    Number_Of_Disputes,
+    Frequency_level,
+    Valid_Disputes,
+    Invalid_Disputes
+   
+  
+FROM 
+    SuspiciousCustomers
+ order by customer_id;
 
+
+    
+    """
+    
     # Execute the SQL query and convert to a pandas DataFrame
     disputes_data = session.sql(sql).to_pandas()
     # Render the title and description in the Streamlit app
     st.subheader("**Dispute Status per Member**")
     # st.dataframe(disputes_data, use_container_width=True)
     # Set up tabs for chart, raw data, and SQL query visibility
-    value_chart_tab, value_dataframe_tab, value_query_tab = st.tabs(
-        ["Chart", "Raw Data", "SQL Query"]
+    value_chart_tab,value_dataframe_tab, value_query_tab = st.tabs(
+        ["Chart","Raw Data", "SQL Query"]
     )
     with value_chart_tab:
         # Prepare data for visualization
@@ -391,25 +450,24 @@ def disputes_valid_invalid(session):
         # Display the bar chart for valid and invalid disputes
         st.markdown("**Valid and Invalid Disputes by Customer ID**")
         st.vega_lite_chart(data=status_distribution, spec=bar_chart_spec, use_container_width=True)
+
+# Exa
     with value_dataframe_tab:
         st.dataframe(disputes_data, use_container_width=True)  # Display the raw dispute data in a DataFrame
     with value_query_tab:
-        st.code(sql, "sql")
+        st.code(sql, "sql")  # Show the SQL query used to retrieve the data
 
-disputes_valid_invalid(session)
+disputes_valid_invalid()
+
+st.title("Valid Customer Chargebacks")
+st.dataframe(valid_df)
 
 def display_grouped_bar_chart():
 
-    sql= f"""
-    select * from DISPUTE_DATA_VIEW  where dispute_status in ('Valid')
-    """
-
-    valid_df = session.sql(sql).to_pandas()
-    
+    st.header("Valid Dispute Types raised by Top 25 Customers:")
     # Group the data and create a stacked bar chart using Plotly
     grouped_data = valid_df.groupby(['CUSTOMER_ID', 'DISPUTE_TYPE']).size().unstack(fill_value=0)
-    fig = px.bar(grouped_data, barmode='stack', labels={'index': 'CUSTOMER_ID', 'value': 'Count'},
-                 title='Count of Occurrences - CUSTOMER_ID vs DISPUTE_TYPE')
+    fig = px.bar(grouped_data, barmode='stack', labels={'index': 'CUSTOMER_ID', 'value': 'Count'})
     fig.update_layout(legend_title_text='DISPUTE_TYPE')
     st.set_option('deprecation.showPyplotGlobalUse', False)
     st.plotly_chart(fig)
@@ -420,46 +478,59 @@ if __name__ == '__main__':
     display_grouped_bar_chart()
 
 sql1= f"""
-    with disputes as  (
-    select  customer_id, dispute_type, count(*) as counts
-    from dispute_data_view 
-    where dispute_status in ('Valid')
+    with disputes as (
+    select customer_id, dispute_type, count(*) as counts
+    from (select * from dispute_data where fraud_indicator='FALSE' and customer_id in (select customer_id from top25customers)) 
     group by customer_id, dispute_type
-    -- order by counts desc
-    -- limit 3
     ),
-    agg_disputes as(
-    select listagg(customer_id ||':'||dispute_type || ', count-'||counts,'; ') 
-        within group (order by customer_id, dispute_type) as aggs
-    from disputes 
+    customer_summary as (
+        select 
+            customer_id, 
+            sum(counts) as total_chargebacks
+        from disputes 
+        group by customer_id
     ),
-    summ as 
-    (
-    select concat(
-    'You are provided with a dataset of customer chargebacks. Your task is to analyze this dataset and generate a detailed report covering several aspects. Follow the steps below to perform the analysis and compile the report:',
-    
-    '1: Customer Chargebacks
-    --Identify which customer_id has filed the highest number of chargebacks.
-    --Provide the total count of chargebacks for this customer and specify the most common dispute_type filed by this customer.',
-    
-    '2: Dispute Type Analysis
-    --Determine the dispute_type that has the highest number of filings across all records.
-    --Include the total count of chargebacks for this most common dispute type.',
-    
-    '3: Summary
-    --Summarize your findings, highlighting any notable trends or patterns in the chargeback data.',
-    
-    '4: Potential Implications
-    --Discuss how the chargeback behavior of the identified customer and the most common dispute types affect the business based on your findings.',
-    
-    '5: Future Trend
-    --Based on the analysis, predict the future trend regarding which customer is more likely to file the highest chargeback and on which dispute type in the next three years.',
-    
-    'here are the aggregated customer_ids and their dispute types:',aggs
-    ) as prompt from agg_disputes
+    top_customer as (
+        select customer_id, total_chargebacks
+        from customer_summary
+        order by total_chargebacks desc
+        limit 1
+    ),
+    most_common_dispute as (
+        select dispute_type, sum(counts) as total_count
+        from disputes
+        group by dispute_type
+        order by total_count desc
+        limit 1
+    ),
+    summ as (
+        select 
+            (select customer_id from top_customer) as highest_chargeback_customer,
+            (select total_chargebacks from top_customer) as highest_count,
+            (select dispute_type from most_common_dispute) as most_common_dispute_type,
+            (select total_count from most_common_dispute) as most_common_count
+    ),
+    analysis as(
+    select  concat(
+        'You are provided with a dataset of customer chargebacks. Your task is to analyze this dataset and generate a detailed report covering several aspects. Follow the steps below:',
+        
+        '1. Identify the customer who has filed the highest number of chargebacks: ',
+        highest_chargeback_customer, 
+        ' with a total count of chargebacks: ',
+        highest_count,
+        '2. Determine the most common dispute type across all records: ',
+        most_common_dispute_type, 
+        ' with a total count of: ',
+        most_common_count,
+        '3. Summarize the findings including trends or patterns.',
+      
+        '4. Discuss implications of chargeback behaviors on the business.',
+        '5. Predict future trends regarding customers likely to file chargebacks.'
+    ) as prompt
+    from summ
     )
-    select snowflake.cortex.complete(?,prompt) from summ;
-    """
+    select snowflake.cortex.complete(?,prompt) from analysis;
+"""
 
 summary_df = session.sql(sql1, params=[model]).to_pandas()
 
