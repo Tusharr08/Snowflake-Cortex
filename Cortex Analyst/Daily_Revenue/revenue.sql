@@ -1,0 +1,120 @@
+USE ROLE sysadmin;
+
+/*--
+• database, schema, warehouse and stage creation
+--*/
+
+-- create demo database
+CREATE OR REPLACE DATABASE cortex_poc;
+
+use database CORTEX_POC;
+
+-- create schema
+CREATE OR REPLACE SCHEMA revenue_timeseries;
+
+-- create warehouse
+CREATE OR REPLACE WAREHOUSE cortex_analyst_wh
+    WAREHOUSE_SIZE = 'large'
+    WAREHOUSE_TYPE = 'standard'
+    AUTO_SUSPEND = 60
+    AUTO_RESUME = TRUE
+    INITIALLY_SUSPENDED = TRUE
+COMMENT = 'warehouse for cortex analyst demo';
+
+
+USE WAREHOUSE cortex_analyst_wh;
+
+CREATE STAGE raw_data DIRECTORY = (ENABLE = TRUE);
+
+/*--
+• table creation
+--*/
+CREATE OR REPLACE TABLE DAILY_REVENUE (
+	DATE DATE,
+	REVENUE FLOAT,
+	COGS FLOAT,
+	FORECASTED_REVENUE FLOAT
+);
+
+CREATE OR REPLACE TABLE DAILY_REVENUE_BY_PRODUCT (
+	DATE DATE,
+	PRODUCT_LINE VARCHAR(16777216),
+	REVENUE FLOAT,
+	COGS FLOAT,
+	FORECASTED_REVENUE FLOAT
+);
+
+CREATE OR REPLACE TABLE DAILY_REVENUE_BY_REGION (
+	DATE DATE,
+	SALES_REGION VARCHAR(16777216),
+	REVENUE FLOAT,
+	COGS FLOAT,
+	FORECASTED_REVENUE FLOAT
+);
+
+/*--
+• looad data into tables
+--*/
+COPY INTO DAILY_REVENUE
+FROM @raw_data
+FILES = ('daily_revenue_combined.csv')
+FILE_FORMAT = (
+    TYPE=CSV,
+    SKIP_HEADER=1,
+    FIELD_DELIMITER=',',
+    TRIM_SPACE=FALSE,
+    FIELD_OPTIONALLY_ENCLOSED_BY=NONE,
+    REPLACE_INVALID_CHARACTERS=TRUE,
+    DATE_FORMAT=AUTO,
+    TIME_FORMAT=AUTO,
+    TIMESTAMP_FORMAT=AUTO
+    EMPTY_FIELD_AS_NULL = FALSE
+    error_on_column_count_mismatch=false
+)
+
+ON_ERROR=CONTINUE
+FORCE = TRUE ;
+
+
+
+COPY INTO DAILY_REVENUE_BY_PRODUCT
+FROM @raw_data
+FILES = ('daily_revenue_by_product_combined.csv')
+FILE_FORMAT = (
+    TYPE=CSV,
+    SKIP_HEADER=1,
+    FIELD_DELIMITER=',',
+    TRIM_SPACE=FALSE,
+    FIELD_OPTIONALLY_ENCLOSED_BY=NONE,
+    REPLACE_INVALID_CHARACTERS=TRUE,
+    DATE_FORMAT=AUTO,
+    TIME_FORMAT=AUTO,
+    TIMESTAMP_FORMAT=AUTO
+    EMPTY_FIELD_AS_NULL = FALSE
+    error_on_column_count_mismatch=false
+)
+
+ON_ERROR=CONTINUE
+FORCE = TRUE ;
+
+
+
+COPY INTO DAILY_REVENUE_BY_REGION
+FROM @raw_data
+FILES = ('daily_revenue_by_region_combined.csv')
+FILE_FORMAT = (
+    TYPE=CSV,
+    SKIP_HEADER=1,
+    FIELD_DELIMITER=',',
+    TRIM_SPACE=FALSE,
+    FIELD_OPTIONALLY_ENCLOSED_BY=NONE,
+    REPLACE_INVALID_CHARACTERS=TRUE,
+    DATE_FORMAT=AUTO,
+    TIME_FORMAT=AUTO,
+    TIMESTAMP_FORMAT=AUTO
+    EMPTY_FIELD_AS_NULL = FALSE
+    error_on_column_count_mismatch=false
+)
+
+ON_ERROR=CONTINUE
+FORCE = TRUE ;
