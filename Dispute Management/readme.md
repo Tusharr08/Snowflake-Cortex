@@ -1,6 +1,9 @@
 # 📊 Proof of Concept: Dispute Management for Chargebacks 🤝
 ## Overview
 Welcome to the Dispute Management for Chargebacks Proof of Concept (POC)! This project aims to streamline the process of managing chargeback disputes using advanced analytical techniques. By leveraging predictive analytics, automated summarization, historical trend analysis, and sentiment analysis, we will enhance decision-making efficiencies and address recurring issues effectively.
+
+![chargeback_app ](image.png)
+
 ## Objectives
 ### 1. Predictive Analytics for Chargebacks
 We will develop a system capable of analyzing past chargeback cases to predict liability outcomes based on the evidence provided. By identifying patterns and trends in historical cases, we can make informed predictions to determine responsibility for chargebacks. 

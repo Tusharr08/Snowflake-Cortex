@@ -1,6 +1,9 @@
 # 🚀 Quickstart with Cortex Analyst
 ## 📚 Overview
 This quickstart guide will help you get started with Cortex Analyst, focusing on how to interact with its service and define Semantic Model definitions that enhance the precision of results from its conversational interface over your Snowflake data.
+
+![cortex_analyst](image.png)
+
 ## 🔍 What You Will Learn
 - How to construct and configure a Semantic Model for your data.
 - How to call the Cortex Analyst REST API for natural-language question-asking on your structured data in Snowflake.
