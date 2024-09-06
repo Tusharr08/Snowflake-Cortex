@@ -36,18 +36,20 @@ Run the following SQL commands to create the database and the sample dataset:
 ### Step 2: Create the Search Service
 Create a Cortex Search Service using the following SQL command:
 
-CREATE OR REPLACE CORTEX SEARCH SERVICE transcript_search_service
-  ON transcript_text
-  ATTRIBUTES region
-  WAREHOUSE = mywh
-  TARGET_LAG = '1 day'
-  AS (
-    SELECT
-        transcript_text,
-        region,
-        agent_id
-    FROM support_transcripts
-);
+```sql
+    CREATE OR REPLACE CORTEX SEARCH SERVICE transcript_search_service
+    ON transcript_text
+    ATTRIBUTES region
+    WAREHOUSE = mywh
+    TARGET_LAG = '1 day'
+    AS (
+        SELECT
+            transcript_text,
+            region,
+            agent_id
+        FROM support_transcripts
+    );
+```
 
 Explanation:
 This command initializes the search service for your data.
